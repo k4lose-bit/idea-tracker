@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brain Lab Pro - 생각 & 일정 통합 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; background-color: #f1f5f9; }
+        .thought-stack { display: flex; flex-direction: column-reverse; }
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        function BrainLab() {
+            // --- 데이터베이스 상태 ---
+            const [thoughts, setThoughts] = useState(JSON.parse(localStorage.getItem('brain_thoughts') || '[]'));
+            const [events, setEvents] = useState(JSON.parse(localStorage.getItem('brain_events') || '{}'));
+            
+            // --- UI 상태 ---
+            const [input, setInput] = useState('');
+            const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+            const [aiSuggestion, setAiSuggestion] = useState(null);
+            const [isAiWorking, setIsAiWorking] = useState(false);
+            const apiKey = localStorage.getItem('openai_key') || '';
+
+            useEffect(() => {
+                localStorage.setItem('brain_thoughts', JSON.stringify(thoughts));
+                localStorage.setItem('brain_events', JSON.stringify(events));
+                lucide.createIcons();
+            }, [thoughts, events]);
+
+            // --- 1. 유사 생각 검색 로직 (Simple Keyword Match) ---
+            const similarThought = useMemo(() => {
+                if (input.length < 5) return null;
+                const keywords = input.split(' ').filter(w => w.length > 1);
+                return thoughts.find(t => 
+                    keywords.some(k => t.content.includes(k)) && t.content !== input
+                );
+            }, [input, thoughts]);
+
+            // --- 2. AI 프로젝트 빌드업 (코드 및 구성 제안) ---
+            const buildUpProject = async () => {
+                if (!apiKey || !input.trim()) {
+                    alert('OpenAI API 키를 먼저 설정해주세요.\n\n설정 방법:\nlocalStorage.setItem("openai_key", "your-api-key")\n\n또는 브라우저 콘솔에서 실행하세요.');
+                    return;
+                }
+                setIsAiWorking(true);
+                try {
+                    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: "gpt-4o-mini",
+                            messages: [
+                                { role: "system", content: "사용자의 아이디어를 바탕으로 프로젝트 구성안과 핵심 코드를 제안하는 전문가입니다. 마크다운 형식을 사용하여 구체적으로 제안하세요." },
+                                { role: "user", content: input }
+                            ]
+                        })
+                    });
+                    const data = await res.json();
+                    setAiSuggestion(data.choices[0].message.content);
+                } catch (e) { 
+                    alert("AI 호출 실패: " + e.message); 
+                } finally { 
+                    setIsAiWorking(false); 
+                }
+            };
+
+            // --- 3. 캘린더 일정 기록 ---
+            const addEvent = (e) => {
+                if(e.key === 'Enter' && e.target.value.trim()) {
+                    const val = e.target.value;
+                    setEvents({ ...events, [selectedDate]: [...(events[selectedDate] || []), val] });
+                    e.target.value = '';
+                }
+            };
+
+            return (
+                <div className="flex h-screen p-4 gap-4 overflow-hidden">
+                    {/* [LEFT] 스마트 캘린더 섹션 */}
+                    <aside className="w-80 flex flex-col gap-4">
+                        <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
+                            <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2">
+                                <i data-lucide="calendar"></i> 일정 관리
+                            </h3>
+                            <input 
+                                type="date" 
+                                value={selectedDate}
+                                onChange={(e) => setSelectedDate(e.target.value)}
+                                className="w-full mb-4 p-2 bg-slate-50 border-none rounded-xl text-sm font-bold"
+                            />
+                            <div className="space-y-2 max-h-40 overflow-y-auto custom-scroll">
+                                {(events[selectedDate] || []).map((ev, i) => (
+                                    <div key={i} className="flex items-center gap-2 text-xs text-slate-600 bg-indigo-50 p-2 rounded-lg">
+                                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div> {ev}
+                                    </div>
+                                ))}
+                            </div>
+                            <input 
+                                onKeyDown={addEvent}
+                                placeholder="+ 일정 추가 (Enter)"
+                                className="w-full mt-4 p-2 text-xs border-b border-slate-100 outline-none focus:border-indigo-400"
+                            />
+                        </div>
+
+                        <div className="flex-1 bg-slate-900 text-white p-6 rounded-[2rem] overflow-hidden flex flex-col">
+                            <h4 className="text-xs font-bold text-indigo-400 uppercase mb-4 tracking-widest">AI Build-up Workshop</h4>
+                            <div className="flex-1 overflow-y-auto custom-scroll text-[13px] leading-relaxed opacity-90">
+                                {isAiWorking ? <div className="animate-pulse">AI가 프로젝트 설계를 구성 중입니다...</div> : 
+                                 aiSuggestion ? <div className="whitespace-pre-wrap">{aiSuggestion}</div> : 
+                                 "중앙에 아이디어를 입력하고 'AI 제안받기'를 눌러보세요."}
+                            </div>
+                        </div>
+                    </aside>
+
+                    {/* [CENTER] 생각 데이터베이스 (탑처럼 쌓임) */}
+                    <main className="flex-1 flex flex-col gap-4">
+                        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
+                            {similarThought && (
+                                <div className="absolute -top-4 left-10 bg-amber-100 text-amber-700 px-4 py-2 rounded-full text-xs font-bold border border-amber-200 shadow-sm animate-bounce">
+                                    💡 예전에 비슷한 생각을 하셨어요: "{similarThought.content.substring(0, 20)}..."
+                                </div>
+                            )}
+                            <textarea 
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                className="w-full h-32 text-xl border-none focus:ring-0 placeholder:text-slate-200 resize-none font-medium"
+                                placeholder="지금 어떤 생각을 하고 계신가요?"
+                            />
+                            <div className="flex justify-between mt-4">
+                                <button onClick={buildUpProject} className="flex items-center gap-2 text-indigo-600 font-bold text-sm">
+                                    <i data-lucide="zap" className="w-4 fill-indigo-600"></i> AI 프로젝트 제안받기
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if (!input.trim()) return;
+                                        setThoughts([{ id: Date.now(), content: input, date: new Date().toLocaleString() }, ...thoughts]);
+                                        setInput('');
+                                    }}
+                                    className="bg-indigo-600 text-white px-10 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
+                                >
+                                    생각 저장
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scroll pr-2">
+                            <div className="thought-stack gap-4">
+                                {thoughts.map(t => (
+                                    <div key={t.id} className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-indigo-300 transition group">
+                                        <div className="flex justify-between mb-2">
+                                            <span className="text-[10px] text-slate-400 font-mono">{t.date}</span>
+                                            <button onClick={() => setThoughts(thoughts.filter(th => th.id !== t.id))} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500"><i data-lucide="trash-2" className="w-4"></i></button>
+                                        </div>
+                                        <p className="text-slate-700 leading-relaxed">{t.content}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<BrainLab />);
+        setTimeout(() => lucide.createIcons(), 500);
+    </script>
+</body>
+</html>
